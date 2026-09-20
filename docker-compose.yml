@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sisaf-db
+    environment:
+      POSTGRES_USER: sisaf
+      POSTGRES_PASSWORD: sisaf
+      POSTGRES_DB: sisaf
+    ports:
+      - "5432:5432"
+    volumes:
+      - sisaf_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sisaf -d sisaf"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sisaf_pgdata:

@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --color-brand-50: #eff4fc;
+  --color-brand-100: #dfe9f8;
+  --color-brand-200: #c5d8f2;
+  --color-brand-300: #9cbce8;
+  --color-brand-400: #6e99da;
+  --color-brand-500: #4d7bc9;
+  --color-brand-600: #3560b4;
+  --color-brand-700: #254a94;
+  --color-brand-800: #122e66;
+  --color-brand-900: #0c2049;
+  --color-brand-950: #071530;
+
+  --color-gold: #fdb410;
+  --color-gold-dark: #a97b06;
+}
+
+:root {
+  /* Altura do header sticky (atualizada em runtime pelo Layout) */
+  --header-h: 0px;
+}
+
+html {
+  /* Acessibilidade: público 45+. 106.25% ≈ 17px, respeita o padrão do navegador */
+  font-size: 106.25%;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #f1f5f9;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+}
+
+::selection {
+  background-color: #fdb410;
+  color: #122e66;
+}
+
+:focus-visible {
+  outline: 2px solid #122e66;
+  outline-offset: 2px;
+}
+
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  border-radius: 0.75rem;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes float-pulse {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.55; }
+  50% { transform: translate3d(0, -18px, 0) scale(1.06); opacity: 0.8; }
+}
+.animate-float-pulse {
+  animation: float-pulse 7s ease-in-out infinite;
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-rise-in {
+  animation: rise-in 0.3s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-float-pulse,
+  .animate-rise-in {
+    animation: none;
+  }
+}

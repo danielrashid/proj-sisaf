@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Env / segredos
+.env
+.env.*
+!.env.example
+
+# Logs / runtime
+*.log
+*.pid
+server.pid
+uvicorn.*.log
+vite.*.log
+stdin.nul
+*.nul
+
+# Node / frontend
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+frontend/*.pid
+frontend/vite.err.log
+frontend/vite.out.log
+
+# Banco local (se usar SQLite local)
+*.sqlite3
+*.db
+
+# IDE / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
