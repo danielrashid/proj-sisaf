@@ -250,6 +250,12 @@ export interface Vinculo {
   ativo: boolean;
 }
 
+export interface Orgao {
+  id: number;
+  nome: string;
+  ativo: boolean;
+}
+
 export interface Usuario {
   id: number;
   nome: string;
@@ -258,6 +264,11 @@ export interface Usuario {
   ativo: boolean;
   perfil_id: number;
   pesquisa_ilimitada: boolean;
+  telefone?: string;
+  matricula?: string;
+  tipo_usuario: "servidor" | "externo";
+  orgao_id?: number;
+  orgao_nome?: string;
   perfil?: Perfil;
   vinculos: Vinculo[];
   permissoes?: string[];
@@ -343,6 +354,8 @@ export interface AcaoFiscal {
   descricao?: string;
   latitude?: number;
   longitude?: number;
+  id_regiao?: number | null;
+  regiao_nome?: string | null;
   status_documento: StatusDocumento;
   codigo_documento?: string;
   medida_status?: MedidaStatus;
@@ -453,10 +466,17 @@ export interface Historico {
   reincidencias: { id: number; natureza: string; ocorrencia: number }[];
 }
 
+export interface RegiaoOut {
+  id: number;
+  nome: string;
+  sigla?: string | null;
+}
+
 export interface MinhaAcao extends AcaoFiscal {
-  os_numero?: number;
+  os_numero: number;
   os_tema?: string;
   os_status?: StatusOS;
+  regiao_nome?: string | null;
 }
 
 export interface BuscaItemOS {

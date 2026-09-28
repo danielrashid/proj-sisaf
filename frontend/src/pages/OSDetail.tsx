@@ -35,6 +35,7 @@ import {
   CAIXA_ESTADO_LABEL,
   TipoAcao,
   TipoDocumento,
+  RegiaoOut,
 } from "../lib/types";
 import {
   Badge,
@@ -97,6 +98,9 @@ type FormDoc = {
   tipo: TipoAcao;
   titulo: string;
   descricao: string;
+  id_regiao: number | "";
+  latitude: string;
+  longitude: string;
   cnpj: string;
   razao: string;
   natureza: string;
@@ -127,6 +131,9 @@ const FORM_VAZIO: FormDoc = {
   tipo: "notificacao",
   titulo: "",
   descricao: "",
+  id_regiao: "",
+  latitude: "",
+  longitude: "",
   cnpj: "",
   razao: "",
   natureza: "",
@@ -154,6 +161,7 @@ export default function OSDetail() {
   const [os, setOs] = useState<OrdemServico | null>(null);
   const [proximas, setProximas] = useState<any[]>([]);
   const [catalog, setCatalog] = useState<TipoDocumento[]>([]);
+  const [regioes, setRegioes] = useState<RegiaoOut[]>([]);
   const [form, setForm] = useState<FormDoc>(FORM_VAZIO);
   const [numeroAuto, setNumeroAuto] = useState("");
   const [erro, setErro] = useState("");
@@ -175,6 +183,10 @@ export default function OSDetail() {
 
   useEffect(() => {
     api.get<TipoDocumento[]>("/tipos-documento").then(setCatalog).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    api.get<RegiaoOut[]>("/regioes").then(setRegioes).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -237,7 +249,13 @@ export default function OSDetail() {
   }
 
   function abrirCriar() {
-    setForm(FORM_VAZIO);
+    setForm(
+      Object.assign({}, FORM_VAZIO, {
+        id_regiao: os?.ra ? regioes.find((r) => r.nome === os.ra)?.id ?? "" : "",
+        latitude: os?.latitude != null ? String(os.latitude) : "",
+        longitude: os?.longitude != null ? String(os.longitude) : "",
+      })
+    );
     setErro("");
     setModalAcao(true);
   }
@@ -256,6 +274,9 @@ export default function OSDetail() {
       tipo: doc.tipo,
       titulo: doc.titulo,
       descricao: doc.descricao ?? "",
+      id_regiao: doc.id_regiao ?? "",
+      latitude: doc.latitude != null ? String(doc.latitude) : "",
+      longitude: doc.longitude != null ? String(doc.longitude) : "",
       cnpj: ai?.cnpj ?? os?.cnpj ?? "",
       razao: ai?.razao_social ?? "",
       natureza: ai?.natureza ?? "",
@@ -303,8 +324,15 @@ export default function OSDetail() {
       tipo: form.tipo,
       titulo: form.titulo,
       descricao: form.descricao.trim() || null,
-      latitude: os?.latitude ?? null,
-      longitude: os?.longitude ?? null,
+      id_regiao: form.id_regiao === "" ? null : form.id_regiao,
+      latitude:
+        form.latitude.trim() !== ""
+          ? parseFloat(form.latitude)
+          : (os?.latitude ?? null),
+      longitude:
+        form.longitude.trim() !== ""
+          ? parseFloat(form.longitude)
+          : (os?.longitude ?? null),
     };
     if (td?.usa_auto_infracao) {
       p.auto_infracao = {
@@ -632,6 +660,8 @@ export default function OSDetail() {
     const nomeTipo = td?.nome ?? a.tipo;
     const corTipo = td ? CATEGORIA_DOCUMENTO_COLORS[td.categoria] : "bg-slate-100 text-slate-600 ring-slate-300";
     const pendente = a.dados_edicao_pendente;
+    const regiaoNome =
+      a.regiao_nome ?? (a.id_regiao != null ? regioes.find((r) => r.id === a.id_regiao)?.nome : undefined);
     return (
       <div key={a.id} className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -661,6 +691,14 @@ export default function OSDetail() {
           {fmtDataHora(a.criado_em)} · {a.auditor_nome}
           {a.emitido_em && a.status_documento !== "rascunho" && ` · Emitido em ${fmtData(a.emitido_em)}`}
         </p>
+        {(regiaoNome || a.latitude != null) && (
+          <p className="mt-1 text-xs text-slate-400">
+            {regiaoNome && <span className="font-medium text-slate-500">{regiaoNome}</span>}
+            {a.latitude != null && a.longitude != null && (
+              <span> · {a.latitude.toFixed(6)}, {a.longitude.toFixed(6)}</span>
+            )}
+          </p>
+        )}
         {a.descricao && <p className="mt-2 text-sm text-slate-600">{a.descricao}</p>}
 
         {a.auto_infracao && (
@@ -1002,6 +1040,40 @@ export default function OSDetail() {
               <input value={form.titulo} onChange={(e) => setCampo("titulo", e.target.value)} className={inputCls} />
             </Field>
           </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field label="Região (RA)">
+              <select
+                value={form.id_regiao}
+                onChange={(e) =>
+                  setCampo("id_regiao", e.target.value === "" ? "" : Number(e.target.value))
+                }
+                className={inputCls}
+              >
+                <option value="">— Sem região —</option>
+                {regioes.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.sigla ? `${r.sigla} — ` : ""}{r.nome}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Latitude">
+              <input
+                value={form.latitude}
+                onChange={(e) => setCampo("latitude", e.target.value)}
+                className={inputCls}
+                placeholder={os?.latitude != null ? String(os.latitude) : "-15.7942290"}
+              />
+            </Field>
+            <Field label="Longitude">
+              <input
+                value={form.longitude}
+                onChange={(e) => setCampo("longitude", e.target.value)}
+                className={inputCls}
+                placeholder={os?.longitude != null ? String(os.longitude) : "-47.8821660"}
+              />
+            </Field>
+          </div>
           <Field label="Descrição">
             <textarea value={form.descricao} onChange={(e) => setCampo("descricao", e.target.value)} rows={2} className={inputCls} />
           </Field>
@@ -1087,6 +1159,38 @@ export default function OSDetail() {
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Título">
               <input value={form.titulo} onChange={(e) => setCampo("titulo", e.target.value)} className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field label="Região (RA)">
+              <select
+                value={form.id_regiao}
+                onChange={(e) =>
+                  setCampo("id_regiao", e.target.value === "" ? "" : Number(e.target.value))
+                }
+                className={inputCls}
+              >
+                <option value="">— Sem região —</option>
+                {regioes.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.sigla ? `${r.sigla} — ` : ""}{r.nome}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Latitude">
+              <input
+                value={form.latitude}
+                onChange={(e) => setCampo("latitude", e.target.value)}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Longitude">
+              <input
+                value={form.longitude}
+                onChange={(e) => setCampo("longitude", e.target.value)}
+                className={inputCls}
+              />
             </Field>
           </div>
           <Field label="Descrição">

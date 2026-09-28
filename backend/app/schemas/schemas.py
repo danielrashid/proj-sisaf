@@ -102,6 +102,10 @@ class UsuarioAdminCreate(BaseModel):
     ativo: bool = True
     vinculos: list[VinculoAdminIn] = []
     permissao_ids: list[int] = []
+    telefone: str | None = None
+    matricula: str | None = None
+    tipo_usuario: str = "servidor"
+    orgao_id: int | None = None
 
 
 class UsuarioAdminUpdate(BaseModel):
@@ -113,6 +117,10 @@ class UsuarioAdminUpdate(BaseModel):
     ativo: bool | None = None
     vinculos: list[VinculoAdminIn] | None = None
     permissao_ids: list[int] | None = None
+    telefone: str | None = None
+    matricula: str | None = None
+    tipo_usuario: str | None = None
+    orgao_id: int | None = None
 
 
 class VinculoOut(BaseModel):
@@ -135,9 +143,30 @@ class UsuarioOut(BaseModel):
     ativo: bool
     perfil_id: int
     pesquisa_ilimitada: bool = False
+    telefone: str | None = None
+    matricula: str | None = None
+    tipo_usuario: str = "servidor"
+    orgao_id: int | None = None
+    orgao_nome: str | None = None
     perfil: PerfilOut | None = None
     vinculos: list[VinculoOut] = []
     permissoes: list[str] = Field(default_factory=list, validation_alias="permissao_codigos")
+
+
+class OrgaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    nome: str
+    ativo: bool = True
+
+
+class OrgaoCreate(BaseModel):
+    nome: str
+
+
+class OrgaoUpdate(BaseModel):
+    nome: str | None = None
+    ativo: bool | None = None
 
 
 class LoginIn(BaseModel):
@@ -271,6 +300,7 @@ class AcaoFiscalCreate(BaseModel):
     descricao: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    id_regiao: int | None = None
 
 
 class AutoInfracaoCreate(BaseModel):
@@ -297,6 +327,13 @@ class TermoMoradorSitRuaIn(BaseModel):
     data_inicio: date | None = None
     endereco_habitual: str | None = None
     observacoes: str | None = None
+
+
+class RegiaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    nome: str
+    sigla: str | None = None
 
 
 class TipoDocumentoOut(BaseModel):
@@ -385,6 +422,8 @@ class AcaoFiscalOut(BaseModel):
     descricao: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    id_regiao: int | None = None
+    regiao_nome: str | None = None
     status_documento: StatusDocumento
     codigo_documento: str | None = None
     medida_status: MedidaStatus | None = None

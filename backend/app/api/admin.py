@@ -17,6 +17,7 @@ from app.core.security import hash_senha
 from app.database import get_db
 from app.models.models import (
     Especialidade,
+    Orgao,
     Perfil,
     Permissao,
     Unidade,
@@ -26,6 +27,9 @@ from app.models.models import (
     VinculoFuncional,
 )
 from app.schemas.schemas import (
+    OrgaoCreate,
+    OrgaoOut,
+    OrgaoUpdate,
     PerfilOut,
     PermissaoCreate,
     PermissaoOut,
@@ -66,6 +70,27 @@ def _validar_perfil(db: Session, perfil_id: int) -> Perfil:
     return perfil
 
 
+def _validar_tipo_usuario(tipo_usuario: str) -> str:
+    if tipo_usuario not in ("servidor", "externo"):
+        raise HTTPException(
+            400, "Tipo de usuário deve ser 'servidor' (DF-LEGAL) ou 'externo'"
+        )
+    return tipo_usuario
+
+
+def _validar_externo_perfil(perfil: Perfil, tipo_usuario: str) -> None:
+    if tipo_usuario == "externo" and perfil.nivel > 1:
+        raise HTTPException(
+            400,
+            "Usuário externo só pode ter perfil de pesquisa limitada (nível 1)",
+        )
+
+
+def _validar_orgao_id(db: Session, orgao_id: int | None) -> None:
+    if orgao_id is not None and not db.get(Orgao, orgao_id):
+        raise HTTPException(404, "Órgão não encontrado")
+
+
 def _validar_permissao_ids(db: Session, ids: list[int]) -> None:
     if not ids:
         return
@@ -101,6 +126,7 @@ def _serializar_usuario(db: Session, usuario: Usuario) -> UsuarioOut:
             select(Usuario)
             .options(
                 selectinload(Usuario.perfil),
+                selectinload(Usuario.orgao),
                 selectinload(Usuario.vinculos).selectinload(VinculoFuncional.unidade),
                 selectinload(Usuario.vinculos).selectinload(VinculoFuncional.especialidade),
             )
@@ -252,8 +278,8 @@ def criar_unidade(
         raise HTTPException(400, "Informe uma sigla válida (até 20 caracteres)")
     if len(nome) < 3:
         raise HTTPException(400, "Informe o nome da unidade")
-    if db.query(Unidade).filter(Unidade.sigla == sigla).first():
-        raise HTTPException(409, "Sigla de unidade já cadastrada")
+    if db.query(Unidade).filter(Unidade.sigla == sigla, Unidade.unidade_pai_id == body.unidade_pai_id).first():
+        raise HTTPException(409, "Sigla de unidade já cadastrada para esta unidade-pai")
     if body.unidade_pai_id and not db.get(Unidade, body.unidade_pai_id):
         raise HTTPException(404, "Unidade-pai não encontrada")
     unidade = Unidade(
@@ -290,8 +316,8 @@ def editar_unidade(
         sigla = body.sigla.strip().upper()
         if not sigla or len(sigla) > 20:
             raise HTTPException(400, "Informe uma sigla válida (até 20 caracteres)")
-        if sigla != unidade.sigla and db.query(Unidade).filter(Unidade.sigla == sigla).first():
-            raise HTTPException(409, "Sigla de unidade já cadastrada")
+        if sigla != unidade.sigla and db.query(Unidade).filter(Unidade.sigla == sigla, Unidade.unidade_pai_id == unidade.unidade_pai_id).first():
+            raise HTTPException(409, "Sigla de unidade já cadastrada para esta unidade-pai")
         unidade.sigla = sigla
         alteracoes["sigla"] = sigla
 
@@ -310,6 +336,9 @@ def editar_unidade(
                 raise HTTPException(404, "Unidade-pai não encontrada")
             if novo_pai in _descendentes(db, unidade.id):
                 raise HTTPException(400, "Não é possível mover para uma unidade descendente")
+        # verificar se a sigla já existe no novo pai
+        if db.query(Unidade).filter(Unidade.sigla == unidade.sigla, Unidade.unidade_pai_id == novo_pai).first():
+            raise HTTPException(409, "Sigla de unidade já cadastrada para esta unidade-pai")
         unidade.unidade_pai_id = novo_pai
         alteracoes["pai"] = str(novo_pai)
 
@@ -356,6 +385,79 @@ def _descendentes(db: Session, unidade_id: int) -> list[int]:
 
 
 # ----------------------------------------------------------------------------- #
+# Órgãos
+# ----------------------------------------------------------------------------- #
+
+
+@router.get("/orgaos", response_model=list[OrgaoOut])
+def listar_orgaos(
+    db: Session = Depends(get_db), solicitante: Usuario = Depends(get_current_user)
+):
+    _nivel(solicitante, 5, "acessar o cadastro de órgãos")
+    return db.scalars(select(Orgao).order_by(Orgao.nome)).all()
+
+
+@router.post("/orgaos", response_model=OrgaoOut)
+def criar_orgao(
+    body: OrgaoCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    solicitante: Usuario = Depends(get_current_user),
+):
+    _nivel(solicitante, 6, "criar órgãos")
+    nome = body.nome.strip()
+    if len(nome) < 2:
+        raise HTTPException(400, "Informe o nome do órgão")
+    if db.query(Orgao).filter(Orgao.nome.ilike(nome)).first():
+        raise HTTPException(409, "Órgão já cadastrado")
+    orgao = Orgao(nome=nome)
+    db.add(orgao)
+    db.flush()
+    registrar_log(
+        db, solicitante.id, "orgao", orgao.id, "criar_orgao", {"nome": nome},
+        request=request,
+    )
+    db.commit()
+    db.refresh(orgao)
+    return orgao
+
+
+@router.patch("/orgaos/{orgao_id}", response_model=OrgaoOut)
+def editar_orgao(
+    orgao_id: int,
+    body: OrgaoUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    solicitante: Usuario = Depends(get_current_user),
+):
+    _nivel(solicitante, 6, "editar órgãos")
+    orgao = db.get(Orgao, orgao_id)
+    if not orgao:
+        raise HTTPException(404, "Órgão não encontrado")
+    alteracoes: dict[str, str] = {}
+    if body.nome is not None and body.nome.strip() != orgao.nome:
+        nome = body.nome.strip()
+        if len(nome) < 2:
+            raise HTTPException(400, "Informe o nome do órgão")
+        if db.query(Orgao).filter(Orgao.nome.ilike(nome)).first():
+            raise HTTPException(409, "Órgão já cadastrado")
+        orgao.nome = nome
+        alteracoes["nome"] = nome
+    if body.ativo is not None and body.ativo != orgao.ativo:
+        orgao.ativo = body.ativo
+        alteracoes["ativo"] = "ativo" if orgao.ativo else "inativo"
+    if not alteracoes:
+        raise HTTPException(400, "Nenhuma alteração informada")
+    registrar_log(
+        db, solicitante.id, "orgao", orgao.id, "editar_orgao", alteracoes,
+        request=request,
+    )
+    db.commit()
+    db.refresh(orgao)
+    return orgao
+
+
+# ----------------------------------------------------------------------------- #
 # Usuários
 # ----------------------------------------------------------------------------- #
 
@@ -376,13 +478,20 @@ def criar_usuario(
     if db.query(Usuario).filter(Usuario.email == email).first():
         raise HTTPException(409, "E-mail já cadastrado")
     cpf = _cpf_digitos(body.cpf)
-    if cpf and db.query(Usuario).filter(Usuario.cpf == cpf).first():
+    if not cpf:
+        raise HTTPException(400, "O CPF é obrigatório no cadastro")
+    if db.query(Usuario).filter(Usuario.cpf == cpf).first():
         raise HTTPException(409, "CPF já cadastrado")
     if len(body.senha) < 6:
         raise HTTPException(400, "A senha deve ter ao menos 6 caracteres")
     perfil = _validar_perfil(db, body.perfil_id)
+    tipo_usuario = _validar_tipo_usuario(body.tipo_usuario)
+    _validar_externo_perfil(perfil, tipo_usuario)
+    _validar_orgao_id(db, body.orgao_id)
     _validar_permissao_ids(db, body.permissao_ids)
-    vinculos = _validar_vinculos(db, body.vinculos)
+    vinculos = [] if tipo_usuario == "externo" else _validar_vinculos(db, body.vinculos)
+    if tipo_usuario == "servidor" and not vinculos:
+        raise HTTPException(400, "Usuário DF-LEGAL precisa de ao menos um vínculo funcional")
 
     usuario = Usuario(
         nome=body.nome.strip(),
@@ -391,6 +500,10 @@ def criar_usuario(
         senha_hash=hash_senha(body.senha),
         perfil=perfil,
         ativo=body.ativo,
+        telefone=(body.telefone or "").strip() or None,
+        matricula=(body.matricula or "").strip() or None,
+        tipo_usuario=tipo_usuario,
+        orgao_id=body.orgao_id,
     )
     db.add(usuario)
     db.flush()
@@ -400,7 +513,8 @@ def criar_usuario(
     registrar_log(
         db, solicitante.id, "usuario", usuario.id, "criar_usuario",
         {"nome": usuario.nome, "email": email, "perfil": perfil.codigo,
-         "vinculos": len(vinculos), "permissao_ids": body.permissao_ids},
+         "tipo_usuario": tipo_usuario, "vinculos": len(vinculos),
+         "permissao_ids": body.permissao_ids},
         request=request,
     )
     db.commit()
@@ -440,17 +554,7 @@ def editar_usuario(
         alteracoes["email"] = email
 
     if body.cpf is not None or "cpf" in body.model_fields_set:
-        cpf = _cpf_digitos(body.cpf)
-        if cpf and cpf != usuario.cpf:
-            outro = db.query(Usuario).filter(
-                Usuario.cpf == cpf, Usuario.id != usuario.id
-            ).first()
-            if outro:
-                raise HTTPException(409, "CPF já cadastrado para outro usuário")
-            usuario.cpf = cpf
-        elif usuario.cpf and not cpf:
-            usuario.cpf = None
-        alteracoes["cpf"] = "alterado"
+        raise HTTPException(400, "O CPF é imutável após o cadastro")
 
     if body.senha:
         if len(body.senha) < 6:
@@ -460,12 +564,43 @@ def editar_usuario(
 
     if body.perfil_id is not None and body.perfil_id != usuario.perfil_id:
         perfil = _validar_perfil(db, body.perfil_id)
+        tipo_usuario = _validar_tipo_usuario(usuario.tipo_usuario)
+        _validar_externo_perfil(perfil, tipo_usuario)
         usuario.perfil = perfil
         alteracoes["perfil"] = perfil.codigo
 
     if body.ativo is not None and body.ativo != usuario.ativo:
         usuario.ativo = body.ativo
         alteracoes["ativo"] = "ativo" if usuario.ativo else "inativo"
+
+    if body.tipo_usuario is not None and body.tipo_usuario != usuario.tipo_usuario:
+        tipo_usuario = _validar_tipo_usuario(body.tipo_usuario)
+        if tipo_usuario == "externo":
+            _validar_externo_perfil(usuario.perfil, tipo_usuario)
+        if tipo_usuario == "servidor" and not usuario.vinculos:
+            raise HTTPException(
+                400, "Usuário DF-LEGAL precisa de ao menos um vínculo funcional"
+            )
+        usuario.tipo_usuario = tipo_usuario
+        alteracoes["tipo_usuario"] = tipo_usuario
+
+    if "telefone" in body.model_fields_set:
+        telefone = (body.telefone or "").strip() or None
+        if telefone != usuario.telefone:
+            usuario.telefone = telefone
+            alteracoes["telefone"] = telefone or "—"
+
+    if "matricula" in body.model_fields_set:
+        matricula = (body.matricula or "").strip() or None
+        if matricula != usuario.matricula:
+            usuario.matricula = matricula
+            alteracoes["matricula"] = matricula or "—"
+
+    if "orgao_id" in body.model_fields_set:
+        _validar_orgao_id(db, body.orgao_id)
+        if body.orgao_id != usuario.orgao_id:
+            usuario.orgao_id = body.orgao_id
+            alteracoes["orgao"] = str(body.orgao_id or "—")
 
     if body.vinculos is not None:
         vinculos = _validar_vinculos(db, body.vinculos)

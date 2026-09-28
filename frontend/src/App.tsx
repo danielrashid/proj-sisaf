@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import OSList from "./pages/OSList";
 import OSCreate from "./pages/OSCreate";
 import OSDetail from "./pages/OSDetail";
+import AcaoDetail from "./pages/AcaoDetail";
 import Autos from "./pages/Autos";
 import Geo from "./pages/Geo";
 import Estabelecimentos from "./pages/Estabelecimentos";
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/os" element={<OSList />} />
             <Route path="/os/nova" element={<OSCreate />} />
             <Route path="/os/:id" element={<OSDetail />} />
+            <Route path="/acoes/:id" element={<AcaoDetail />} />
             <Route path="/ouvidorias" element={<CaixaOuvidorias />} />
             <Route path="/programacoes" element={<Programacoes />} />
             <Route path="/autos" element={<Autos />} />

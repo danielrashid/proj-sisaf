@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Building2,
   KeyRound,
+  Landmark,
   Pencil,
   Plus,
   Search,
@@ -17,6 +18,7 @@ import { useAuth } from "../lib/auth";
 import type { LucideIcon } from "lucide-react";
 import {
   Especialidade,
+  Orgao,
   Perfil,
   Permissao,
   Unidade,
@@ -33,6 +35,7 @@ import {
   Spinner,
   inputCls,
   masckCPF,
+  useToast,
 } from "../components/ui";
 
 function Switch({
@@ -82,6 +85,7 @@ interface FormUsuarioProps {
   especialidades: Especialidade[];
   perfis: Perfil[];
   permissoes: Permissao[];
+  orgaos: Orgao[];
   salvando: boolean;
   setSalvando: (v: boolean) => void;
   onSalvo: () => void;
@@ -94,6 +98,7 @@ function FormUsuario({
   especialidades,
   perfis,
   permissoes,
+  orgaos,
   salvando,
   setSalvando,
   onSalvo,
@@ -103,6 +108,11 @@ function FormUsuario({
   const [email, setEmail] = useState(alvo?.email ?? "");
   const [cpf, setCpf] = useState(alvo?.cpf ?? "");
   const [senha, setSenha] = useState("");
+  const [confirmar, setConfirmar] = useState("");
+  const [tipo, setTipo] = useState<"servidor" | "externo">(alvo?.tipo_usuario ?? "servidor");
+  const [telefone, setTelefone] = useState(alvo?.telefone ?? "");
+  const [matricula, setMatricula] = useState(alvo?.matricula ?? "");
+  const [orgaoId, setOrgaoId] = useState<string>(alvo?.orgao_id ? String(alvo.orgao_id) : "");
   const [perfilId, setPerfilId] = useState<string>(alvo?.perfil_id ? String(alvo.perfil_id) : "");
   const [ativo, setAtivo] = useState(alvo?.ativo ?? true);
   const [vinculos, setVinculos] = useState<VinculoAdmin[]>(
@@ -121,6 +131,21 @@ function FormUsuario({
       : []
   );
   const [erro, setErro] = useState("");
+  const { addToast } = useToast();
+
+  const ehExterno = tipo === "externo";
+  const perfisDisponiveis = ehExterno ? perfis.filter((p) => p.nivel <= 1) : perfis;
+
+  function escolherTipo(v: string) {
+    setTipo(v as "servidor" | "externo");
+    if (v === "externo") {
+      setPerfilId("");
+      setVinculos([]);
+      setExtraPerms([]);
+    } else {
+      setCpf("");
+    }
+  }
 
   function novoVinculo() {
     setVinculos((prev) => [
@@ -139,33 +164,51 @@ function FormUsuario({
     setErro("");
     if (!nome.trim() || nome.trim().length < 3) return setErro("Informe o nome completo");
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return setErro("E-mail inválido");
+    if (!cpf.replace(/\D/g, "")) return setErro("O CPF é obrigatório");
     if (!perfilId) return setErro("Selecione o perfil");
     if (!alvo && senha.length < 6) return setErro("A senha deve ter ao menos 6 caracteres");
-    for (const v of vinculos) {
-      if (!v.unidade_id || !v.especialidade_id) return setErro("Preencha unidade e especialidade dos vínculos");
+    if (senha && senha.length < 6) return setErro("A senha deve ter ao menos 6 caracteres");
+    if (senha !== confirmar) return setErro("As senhas não conferem");
+    if (!ehExterno) {
+      if (vinculos.length === 0) return setErro("Usuário DF-LEGAL precisa de ao menos um vínculo funcional");
+      for (const v of vinculos) {
+        if (!v.unidade_id || !v.especialidade_id) return setErro("Preencha unidade e especialidade dos vínculos");
+      }
     }
     const payload: Record<string, unknown> = {
       nome: nome.trim(),
       email: email.trim().toLowerCase(),
-      cpf: cpf.replace(/\D/g, "") || null,
       perfil_id: Number(perfilId),
       ativo,
-      vinculos: vinculos.map((v) => ({
-        unidade_id: Number(v.unidade_id),
-        especialidade_id: Number(v.especialidade_id),
-        cargo: v.cargo.trim() || "Servidor",
-        ativo: v.ativo,
-      })),
-      permissao_ids: extraPerms,
+      tipo_usuario: tipo,
+      telefone: telefone.trim() || null,
+      matricula: matricula.trim() || null,
+      orgao_id: orgaoId ? Number(orgaoId) : null,
+      vinculos: ehExterno
+        ? []
+        : vinculos.map((v) => ({
+            unidade_id: Number(v.unidade_id),
+            especialidade_id: Number(v.especialidade_id),
+            cargo: v.cargo.trim() || "Servidor",
+            ativo: v.ativo,
+          })),
+      permissao_ids: ehExterno ? [] : extraPerms,
     };
     if (senha) payload.senha = senha;
+    if (!alvo) payload.cpf = cpf.replace(/\D/g, "");
     setSalvando(true);
     try {
-      if (alvo) await api.patch<Usuario>(`/admin/usuarios/${alvo.id}`, payload);
-      else await api.post<Usuario>("/admin/usuarios", payload);
+      if (alvo) {
+        await api.patch<Usuario>(`/admin/usuarios/${alvo.id}`, payload);
+        addToast("Usuário atualizado com sucesso", "success");
+      } else {
+        await api.post<Usuario>("/admin/usuarios", payload);
+        addToast("Usuário criado com sucesso", "success");
+      }
       onSalvo();
     } catch (err: any) {
       setErro(err.message || "Não foi possível salvar");
+      addToast(err.message || "Erro ao salvar usuário", "error");
     } finally {
       setSalvando(false);
     }
@@ -177,18 +220,10 @@ function FormUsuario({
         <Field label="Nome completo">
           <input className={inputCls} value={nome} onChange={(e) => setNome(e.target.value)} />
         </Field>
-        <Field label="Perfil">
-          <select
-            className={inputCls}
-            value={perfilId}
-            onChange={(e) => setPerfilId(e.target.value)}
-          >
-            <option value="">Selecione…</option>
-            {perfis.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.nome} (nível {p.nivel})
-              </option>
-            ))}
+        <Field label="Tipo de usuário">
+          <select className={inputCls} value={tipo} onChange={(e) => escolherTipo(e.target.value)}>
+            <option value="servidor">DF-LEGAL (servidor)</option>
+            <option value="externo">Usuário externo</option>
           </select>
         </Field>
         <Field label="E-mail">
@@ -199,13 +234,47 @@ function FormUsuario({
             type="email"
           />
         </Field>
-        <Field label="CPF (opcional)">
+        <Field
+          label={alvo ? "CPF (imutável)" : "CPF"}
+          hint={alvo ? "O CPF não pode ser alterado após o cadastro" : "Obrigatório, sem pontos ou traços"}
+        >
           <input
             className={inputCls}
             value={cpf}
+            disabled={!!alvo}
             onChange={(e) => setCpf(masckCPF(e.target.value))}
             placeholder="000.000.000-00"
           />
+        </Field>
+        <Field label="Telefone">
+          <input className={inputCls} value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="(61) 99999-0000" />
+        </Field>
+        <Field label="Matrícula">
+          <input className={inputCls} value={matricula} onChange={(e) => setMatricula(e.target.value)} placeholder="Ex.: 25.415-8" />
+        </Field>
+        <Field label="Órgão">
+          <select className={inputCls} value={orgaoId} onChange={(e) => setOrgaoId(e.target.value)}>
+            <option value="">Sem órgão</option>
+            {orgaos.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.nome}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Perfil" hint={ehExterno ? "Usuário externo: apenas pesquisa limitada" : undefined}>
+          <select
+            className={inputCls}
+            value={perfilId}
+            onChange={(e) => setPerfilId(e.target.value)}
+          >
+            <option value="">Selecione…</option>
+            {perfisDisponiveis.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nome} (nível {p.nivel})
+              </option>
+            ))}
+          </select>
         </Field>
         <Field
           label={alvo ? "Nova senha (opcional)" : "Senha"}
@@ -218,6 +287,17 @@ function FormUsuario({
             type="password"
           />
         </Field>
+        <Field
+          label="Confirmar senha"
+          hint={alvo ? "Confirme a nova senha ou deixe em branco" : "Repita a senha"}
+        >
+          <input
+            className={inputCls}
+            value={confirmar}
+            onChange={(e) => setConfirmar(e.target.value)}
+            type="password"
+          />
+        </Field>
         <Field label="Status">
           <div className="flex items-center gap-3 pt-1">
             <Switch on={ativo} onChange={() => setAtivo((v) => !v)} />
@@ -226,88 +306,90 @@ function FormUsuario({
         </Field>
       </div>
 
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-medium text-slate-700">Vínculos funcionais</span>
-          <Btn type="button" variant="ghost" onClick={novoVinculo} className="!px-2 !py-1 text-xs">
-            <Plus size={14} /> Adicionar vínculo
-          </Btn>
-        </div>
-        <div className="space-y-2">
-          {vinculos.map((v, i) => (
-            <div key={i} className="grid gap-2 rounded-xl border border-slate-200 p-2.5 sm:grid-cols-[1fr_1fr_1fr_auto_auto]">
-              <select
-                className={inputCls}
-                value={v.unidade_id || ""}
-                onChange={(e) => {
-                  const novo = [...vinculos];
-                  novo[i] = { ...v, unidade_id: Number(e.target.value) };
-                  setVinculos(novo);
-                }}
-              >
-                <option value="">Unidade…</option>
-                {unidades.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.sigla} — {u.nome}
-                  </option>
-                ))}
-              </select>
-              <select
-                className={inputCls}
-                value={v.especialidade_id || ""}
-                onChange={(e) => {
-                  const novo = [...vinculos];
-                  novo[i] = { ...v, especialidade_id: Number(e.target.value) };
-                  setVinculos(novo);
-                }}
-              >
-                <option value="">Especialidade…</option>
-                {especialidades.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.sigla} — {s.nome}
-                  </option>
-                ))}
-              </select>
-              <input
-                className={inputCls}
-                placeholder="Cargo"
-                value={v.cargo}
-                onChange={(e) => {
-                  const novo = [...vinculos];
-                  novo[i] = { ...v, cargo: e.target.value };
-                  setVinculos(novo);
-                }}
-              />
-              <div className="flex items-center justify-center">
-                <Switch
-                  on={v.ativo}
-                  title="Vínculo ativo"
-                  onChange={() => {
+      {!ehExterno && (
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium text-slate-700">Vínculos funcionais</span>
+            <Btn type="button" variant="ghost" onClick={novoVinculo} className="!px-2 !py-1 text-xs">
+              <Plus size={14} /> Adicionar vínculo
+            </Btn>
+          </div>
+          <div className="space-y-2">
+            {vinculos.map((v, i) => (
+              <div key={i} className="grid gap-2 rounded-xl border border-slate-200 p-2.5 sm:grid-cols-[1fr_1fr_1fr_auto_auto]">
+                <select
+                  className={inputCls}
+                  value={v.unidade_id || ""}
+                  onChange={(e) => {
                     const novo = [...vinculos];
-                    novo[i] = { ...v, ativo: !v.ativo };
+                    novo[i] = { ...v, unidade_id: Number(e.target.value) };
+                    setVinculos(novo);
+                  }}
+                >
+                  <option value="">Unidade…</option>
+                  {unidades.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.sigla} — {u.nome}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className={inputCls}
+                  value={v.especialidade_id || ""}
+                  onChange={(e) => {
+                    const novo = [...vinculos];
+                    novo[i] = { ...v, especialidade_id: Number(e.target.value) };
+                    setVinculos(novo);
+                  }}
+                >
+                  <option value="">Especialidade…</option>
+                  {especialidades.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.sigla} — {s.nome}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className={inputCls}
+                  placeholder="Cargo"
+                  value={v.cargo}
+                  onChange={(e) => {
+                    const novo = [...vinculos];
+                    novo[i] = { ...v, cargo: e.target.value };
                     setVinculos(novo);
                   }}
                 />
+                <div className="flex items-center justify-center">
+                  <Switch
+                    on={v.ativo}
+                    title="Vínculo ativo"
+                    onChange={() => {
+                      const novo = [...vinculos];
+                      novo[i] = { ...v, ativo: !v.ativo };
+                      setVinculos(novo);
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setVinculos((prev) => prev.filter((_, j) => j !== i))}
+                  className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+                  title="Remover vínculo"
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setVinculos((prev) => prev.filter((_, j) => j !== i))}
-                className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
-                title="Remover vínculo"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          ))}
-          {vinculos.length === 0 && (
-            <p className="text-xs text-slate-400">
-              Sem vínculos — o usuário não verá OS nem a caixa de ouvidorias.
-            </p>
-          )}
+            ))}
+            {vinculos.length === 0 && (
+              <p className="text-xs text-slate-400">
+                Sem vínculos — o usuário não verá OS nem a caixa de ouvidorias.
+              </p>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      {permissoes.length > 0 && (
+      {!ehExterno && permissoes.length > 0 && (
         <div>
           <span className="mb-2 block text-sm font-medium text-slate-700">
             Permissões individuais (além do perfil)
@@ -383,6 +465,7 @@ function FormUnidade({
     alvo ? alvo.especialidades.map((e) => e.especialidade.id) : []
   );
   const [erro, setErro] = useState("");
+  const { addToast } = useToast();
 
   function toggleEsp(id: number) {
     setEscolhidas((prev) =>
@@ -405,6 +488,7 @@ function FormUnidade({
           ativo,
           especialidade_ids: escolhidas,
         });
+        addToast("Unidade atualizada com sucesso", "success");
       } else {
         await api.post<Unidade>("/admin/unidades", {
           nome: nome.trim(),
@@ -413,14 +497,18 @@ function FormUnidade({
           ativo,
           especialidade_ids: escolhidas,
         });
+        addToast("Unidade criada com sucesso", "success");
       }
       onSalvo();
     } catch (err: any) {
       setErro(err.message || "Não foi possível salvar");
+      addToast(err.message || "Erro ao salvar unidade", "error");
     } finally {
       setSalvando(false);
     }
   }
+
+  const podeAlterarPai = !alvo || !alvo.unidade_pai_id;
 
   return (
     <form onSubmit={salvar} className="space-y-4">
@@ -433,16 +521,18 @@ function FormUnidade({
             placeholder="EX: SULOC"
           />
         </Field>
-        <Field label="Unidade-pai (opcional)">
-          <select className={inputCls} value={paiId} onChange={(e) => setPaiId(e.target.value)}>
-            <option value="">Sem unidade-pai</option>
-            {options.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.sigla} — {u.nome}
-              </option>
-            ))}
-          </select>
-        </Field>
+        {podeAlterarPai && (
+          <Field label="Unidade-pai (opcional)">
+            <select className={inputCls} value={paiId} onChange={(e) => setPaiId(e.target.value)}>
+              <option value="">Sem unidade-pai</option>
+              {options.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.sigla} — {u.nome}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
       </div>
       <Field label="Nome da unidade">
         <input className={inputCls} value={nome} onChange={(e) => setNome(e.target.value)} />
@@ -451,6 +541,14 @@ function FormUnidade({
         <div className="flex items-center gap-3 pt-1">
           <Switch on={ativo} onChange={() => setAtivo((v) => !v)} />
           <span className="text-sm text-slate-600">{ativo ? "Ativo" : "Inativo"}</span>
+        </div>
+      </Field>
+      <Field label="Permitir subunidades" hint="Toda unidade pode ser pai de outras. Basta que outras a selecionem no campo 'Unidade-pai'.">
+        <div className="flex items-center gap-3 pt-1">
+          <span className="inline-flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 ring-1 ring-emerald-200">
+            <span className="relative h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            <span>Disponível para ser unidade-pai</span>
+          </span>
         </div>
       </Field>
       <div>
@@ -509,6 +607,7 @@ function FormPermissao({
   const [nome, setNome] = useState(alvo?.nome ?? "");
   const [ativo, setAtivo] = useState(alvo?.ativo ?? true);
   const [erro, setErro] = useState("");
+  const { addToast } = useToast();
 
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
@@ -522,15 +621,18 @@ function FormPermissao({
           nome: nome.trim(),
           ativo,
         });
+        addToast("Permissão atualizada com sucesso", "success");
       } else {
         await api.post<Permissao>("/admin/permissoes", {
           codigo: codigo.trim(),
           nome: nome.trim(),
         });
+        addToast("Permissão criada com sucesso", "success");
       }
       onSalvo();
     } catch (err: any) {
       setErro(err.message || "Não foi possível salvar");
+      addToast(err.message || "Erro ao salvar permissão", "error");
     } finally {
       setSalvando(false);
     }
@@ -573,11 +675,84 @@ function FormPermissao({
   );
 }
 
-type Tab = "usuarios" | "unidades" | "permissoes";
+interface FormOrgaoProps {
+  alvo?: Orgao;
+  salvando: boolean;
+  setSalvando: (v: boolean) => void;
+  onSalvo: () => void;
+  onClose: () => void;
+}
+
+function FormOrgao({
+  alvo,
+  salvando,
+  setSalvando,
+  onSalvo,
+  onClose,
+}: FormOrgaoProps) {
+  const [nome, setNome] = useState(alvo?.nome ?? "");
+  const [ativo, setAtivo] = useState(alvo?.ativo ?? true);
+  const [erro, setErro] = useState("");
+  const { addToast } = useToast();
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault();
+    setErro("");
+    if (nome.trim().length < 3) return setErro("Informe o nome do órgão (mínimo 3 caracteres)");
+    setSalvando(true);
+    try {
+      if (alvo) {
+        await api.patch<Orgao>(`/admin/orgaos/${alvo.id}`, {
+          nome: nome.trim(),
+          ativo,
+        });
+        addToast("Órgão atualizado com sucesso", "success");
+      } else {
+        await api.post<Orgao>("/admin/orgaos", { nome: nome.trim() });
+        addToast("Órgão criado com sucesso", "success");
+      }
+      onSalvo();
+    } catch (err: any) {
+      setErro(err.message || "Não foi possível salvar o órgão");
+      addToast(err.message || "Erro ao salvar órgão", "error");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <form onSubmit={salvar} className="space-y-4">
+      <Field label="Nome">
+        <input className={inputCls} value={nome} onChange={(e) => setNome(e.target.value)} />
+      </Field>
+      <Field label="Status">
+        <div className="flex items-center gap-3 pt-1">
+          <Switch on={ativo} onChange={() => setAtivo((v) => !v)} />
+          <span className="text-sm text-slate-600">
+            {ativo ? "Órgão ativo" : "Órgão inativo"}
+          </span>
+        </div>
+      </Field>
+      {erro && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{erro}</p>}
+      <div className="flex justify-end gap-2">
+        <Btn type="button" variant="secondary" onClick={onClose}>
+          Cancelar
+        </Btn>
+        <Btn type="submit" disabled={salvando}>
+          {salvando ? <Spinner size={16} /> : <Plus size={16} />}
+          {alvo ? "Salvar alterações" : "Criar órgão"}
+        </Btn>
+      </div>
+    </form>
+  );
+}
+
+type Tab = "usuarios" | "unidades" | "orgaos" | "permissoes";
 
 const TABS: { key: Tab; label: string; icon: LucideIcon }[] = [
   { key: "usuarios", label: "Usuários", icon: Users },
   { key: "unidades", label: "Unidades", icon: Building2 },
+  { key: "orgaos", label: "Órgãos", icon: Landmark },
   { key: "permissoes", label: "Permissões", icon: KeyRound },
 ];
 
@@ -594,6 +769,7 @@ export default function Admin() {
   const [especialidades, setEspecialidades] = useState<Especialidade[]>([]);
   const [perfis, setPerfis] = useState<Perfil[]>([]);
   const [permissoes, setPermissoes] = useState<Permissao[]>([]);
+  const [orgaos, setOrgaos] = useState<Orgao[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -601,6 +777,7 @@ export default function Admin() {
   const [userForm, setUserForm] = useState<{ alvo?: Usuario } | null>(null);
   const [unitForm, setUnitForm] = useState<{ alvo?: Unidade } | null>(null);
   const [permForm, setPermForm] = useState<{ alvo?: Permissao } | null>(null);
+  const [orgaoForm, setOrgaoForm] = useState<{ alvo?: Orgao } | null>(null);
 
   const carregar = useCallback(() => {
     setLoading(true);
@@ -611,13 +788,15 @@ export default function Admin() {
       api.get<Especialidade[]>("/especialidades"),
       podeGerir ? api.get<Perfil[]>("/admin/perfis") : Promise.resolve([] as Perfil[]),
       podeGerir ? api.get<Permissao[]>("/admin/permissoes") : Promise.resolve([] as Permissao[]),
+      podeEstrutura ? api.get<Orgao[]>("/admin/orgaos") : Promise.resolve([] as Orgao[]),
     ])
-      .then(([u, un, esp, pf, pm]) => {
+      .then(([u, un, esp, pf, pm, og]) => {
         setUsuarios(u);
         setUnidades(un);
         setEspecialidades(esp);
         setPerfis(pf);
         setPermissoes(pm);
+        setOrgaos(og);
       })
       .catch((e) => setErro(e.message))
       .finally(() => setLoading(false));
@@ -631,6 +810,7 @@ export default function Admin() {
     setUserForm(null);
     setUnitForm(null);
     setPermForm(null);
+    setOrgaoForm(null);
     await carregar();
   }
 
@@ -651,6 +831,18 @@ export default function Admin() {
     try {
       await api.patch<Unidade>(`/admin/unidades/${u.id}`, { ativo: !u.ativo });
       setUnidades((prev) => prev.map((x) => (x.id === u.id ? { ...x, ativo: !u.ativo } : x)));
+    } catch (err: any) {
+      alert(err.message || "Não foi possível salvar");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function toggleOrgao(o: Orgao) {
+    setSalvando(true);
+    try {
+      await api.patch<Orgao>(`/admin/orgaos/${o.id}`, { ativo: !o.ativo });
+      setOrgaos((prev) => prev.map((x) => (x.id === o.id ? { ...x, ativo: !o.ativo } : x)));
     } catch (err: any) {
       alert(err.message || "Não foi possível salvar");
     } finally {
@@ -719,6 +911,11 @@ export default function Admin() {
             <Plus size={16} /> Nova permissão
           </Btn>
         )}
+        {tab === "orgaos" && podeEstrutura && (
+          <Btn onClick={() => setOrgaoForm({})}>
+            <Plus size={16} /> Novo órgão
+          </Btn>
+        )}
       </div>
 
       {erro && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{erro}</p>}
@@ -738,6 +935,7 @@ export default function Admin() {
             {label}
             {key === "usuarios" && <span className="opacity-70">{usuarios.length}</span>}
             {key === "unidades" && <span className="opacity-70">{unidades.length}</span>}
+            {key === "orgaos" && <span className="opacity-70">{orgaos.length}</span>}
             {key === "permissoes" && <span className="opacity-70">{permissoes.length}</span>}
           </button>
         ))}
@@ -899,6 +1097,55 @@ export default function Admin() {
         </Card>
       )}
 
+      {tab === "orgaos" && podeEstrutura && (
+        <Card className="overflow-hidden">
+          {loading ? (
+            <div className="p-5 text-sm text-slate-400">Carregando…</div>
+          ) : orgaos.length === 0 ? (
+            <div className="p-5 text-sm text-slate-400">
+              Nenhum órgão cadastrado.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Órgão</th>
+                    <th className="w-36 px-4 py-3 whitespace-nowrap">Status</th>
+                    <th className="px-4 py-3 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {orgaos.map((o) => (
+                    <tr key={o.id} className="transition hover:bg-slate-50/60">
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-slate-700">{o.nome}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              on={o.ativo}
+                              busy={salvando}
+                              disabled={!podeEstrutura}
+                              onChange={() => toggleOrgao(o)}
+                            />
+                            <BadgeAtivo on={o.ativo} />
+                          </div>
+                        </td>
+                      <td className="px-4 py-3 text-right">
+                        <Btn variant="secondary" className="!px-2.5 !py-1.5" onClick={() => setOrgaoForm({ alvo: o })}>
+                          <Pencil size={14} /> Editar
+                        </Btn>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
       {tab === "permissoes" && (
         <div className="space-y-3">
           {loading ? (
@@ -974,6 +1221,7 @@ export default function Admin() {
             especialidades={especialidades}
             perfis={perfis}
             permissoes={permissoes}
+            orgaos={orgaos}
             salvando={salvando}
             setSalvando={setSalvando}
             onSalvo={aposSalvar}
@@ -1004,6 +1252,18 @@ export default function Admin() {
             setSalvando={setSalvando}
             onSalvo={aposSalvar}
             onClose={() => setPermForm(null)}
+          />
+        )}
+      </Modal>
+
+      <Modal open={!!orgaoForm} title={orgaoForm?.alvo ? "Editar órgão" : "Novo órgão"} onClose={() => setOrgaoForm(null)}>
+        {orgaoForm && (
+          <FormOrgao
+            alvo={orgaoForm.alvo}
+            salvando={salvando}
+            setSalvando={setSalvando}
+            onSalvo={aposSalvar}
+            onClose={() => setOrgaoForm(null)}
           />
         )}
       </Modal>

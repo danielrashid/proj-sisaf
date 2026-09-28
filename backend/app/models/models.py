@@ -161,6 +161,16 @@ class UsuarioPermissao(Base):
     )
 
 
+class Orgao(Base):
+    __tablename__ = "orgaos"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome: Mapped[str] = mapped_column(String(150), unique=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    usuarios: Mapped[list["Usuario"]] = relationship(back_populates="orgao")
+
+
 class Usuario(Base):
     __tablename__ = "usuarios"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -168,12 +178,19 @@ class Usuario(Base):
     cpf: Mapped[str | None] = mapped_column(String(11), unique=True, nullable=True)
     email: Mapped[str] = mapped_column(String(150), unique=True)
     senha_hash: Mapped[str] = mapped_column(String(255))
+    telefone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    matricula: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    tipo_usuario: Mapped[str] = mapped_column(String(20), default="servidor")
+    orgao_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orgaos.id"), nullable=True
+    )
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     pesquisa_ilimitada: Mapped[bool] = mapped_column(Boolean, default=False)
     perfil_id: Mapped[int] = mapped_column(ForeignKey("perfis.id"))
     criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     perfil: Mapped["Perfil"] = relationship(back_populates="usuarios")
+    orgao: Mapped["Orgao | None"] = relationship(back_populates="usuarios")
     vinculos: Mapped[list["VinculoFuncional"]] = relationship(
         back_populates="usuario", cascade="all, delete-orphan"
     )
@@ -187,16 +204,21 @@ class Usuario(Base):
         codigos.update(p.codigo for p in self.permissoes)
         return sorted(codigos)
 
+    @property
+    def orgao_nome(self) -> str | None:
+        return self.orgao.nome if self.orgao else None
+
 
 class Unidade(Base):
     __tablename__ = "unidades"
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(150))
-    sigla: Mapped[str] = mapped_column(String(20), unique=True)
+    sigla: Mapped[str] = mapped_column(String(20))
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     unidade_pai_id: Mapped[int | None] = mapped_column(
         ForeignKey("unidades.id"), nullable=True
     )
+    __table_args__ = (UniqueConstraint("sigla", "unidade_pai_id", name="ux_unidades_sigla_pai"),)
 
     pai: Mapped["Unidade | None"] = relationship(
         foreign_keys=[unidade_pai_id], remote_side=[id]
@@ -406,6 +428,9 @@ class AcaoFiscal(Base):
     descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
     latitude: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
     longitude: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
+    id_regiao: Mapped[int | None] = mapped_column(
+        ForeignKey("regioes.id"), nullable=True
+    )
     tipo_documento_id: Mapped[int | None] = mapped_column(
         ForeignKey("tipos_documento.id"), nullable=True
     )
@@ -425,6 +450,9 @@ class AcaoFiscal(Base):
 
     os: Mapped["OrdemServico"] = relationship(back_populates="acoes")
     auditor: Mapped["Usuario"] = relationship()
+    regiao: Mapped["Regiao | None"] = relationship(
+        back_populates="acoes", uselist=False
+    )
     tipo_documento: Mapped["TipoDocumento | None"] = relationship()
     auto_infracao: Mapped["AutoInfracao | None"] = relationship(
         back_populates="acao", uselist=False, cascade="all, delete-orphan"
@@ -565,6 +593,15 @@ class LogAuditoria(Base):
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(250), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class Regiao(Base):
+    __tablename__ = "regioes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome: Mapped[str] = mapped_column(String(120), unique=True)
+    sigla: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    acoes: Mapped[list["AcaoFiscal"]] = relationship(back_populates="regiao")
 
 
 class CamadaGeo(Base):

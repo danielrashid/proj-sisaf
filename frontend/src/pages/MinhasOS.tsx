@@ -20,6 +20,7 @@ import { useAuth } from "../lib/auth";
 import {
   MinhaAcao,
   OrdemServico,
+  RegiaoOut,
   StatusOS,
   TIPO_ACAO_LABEL,
   TipoAcao,
@@ -66,6 +67,8 @@ export default function MinhasOS() {
   const { usuario } = useAuth();
   const [os, setOs] = useState<OrdemServico[]>([]);
   const [acoes, setAcoes] = useState<MinhaAcao[]>([]);
+  const [regioes, setRegioes] = useState<RegiaoOut[]>([]);
+  const [idRegiaoSel, setIdRegiaoSel] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [selecionadaId, setSelecionadaId] = useState<number | null>(null);
@@ -79,16 +82,28 @@ export default function MinhasOS() {
 
   function carregar() {
     setLoading(true);
+    const params = new URLSearchParams();
+    if (idRegiaoSel) params.set("id_regiao", idRegiaoSel);
+    if (tipoDoc) params.set("tipo_documento_id", tipoDoc);
+    if (situacao) params.set("status_documento", situacao);
+    const query = params.toString();
     Promise.all([
       api.get<OrdemServico[]>("/os/minhas").catch(() => []),
-      api.get<MinhaAcao[]>("/acoes/minhas").catch(() => []),
+      api.get<MinhaAcao[]>(query ? `/acoes/minhas?${query}` : "/acoes/minhas").catch(() => []),
+      api.get<RegiaoOut[]>("/regioes").catch(() => []),
     ])
-      .then(([osList, acoesList]) => {
+      .then(([osList, acoesList, regioesList]) => {
         setOs(osList);
         setAcoes(acoesList);
+        setRegioes(regioesList);
       })
       .finally(() => setLoading(false));
   }
+
+  useEffect(() => {
+    carregar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idRegiaoSel]);
 
   useEffect(() => {
     carregar();
@@ -252,6 +267,16 @@ export default function MinhasOS() {
               {Object.entries(TIPO_ACAO_LABEL).map(([k, v]) => (
                 <option key={k} value={k}>
                   {v}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Região">
+            <select value={idRegiaoSel} onChange={(e) => setIdRegiaoSel(e.target.value)} className={inputCls}>
+              <option value="">Todas as regiões</option>
+              {regioes.map((r) => (
+                <option key={r.id} value={String(r.id)}>
+                  {r.nome}
                 </option>
               ))}
             </select>
@@ -427,6 +452,9 @@ export default function MinhasOS() {
                           <span className="truncate">
                             OS #{a.os_numero} · {a.os_tema}
                           </span>
+                          {a.regiao_nome && (
+                            <Badge text={a.regiao_nome} color="bg-brand-50 text-brand-700 ring-brand-200" />
+                          )}
                           {a.auto_infracao && (
                             <Badge text={`AI ${a.auto_infracao.status}`} color={STATUS_COLORS[a.auto_infracao.status]} />
                           )}

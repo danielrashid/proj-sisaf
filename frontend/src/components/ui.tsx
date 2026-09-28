@@ -1,6 +1,76 @@
-import { ReactNode } from "react";
-import { Loader2, X } from "lucide-react";
+import { createContext, ReactNode, useContext, useState } from "react";
+import { Loader2, X, CheckCircle2, AlertCircle, Info } from "lucide-react";
 import { STATUS_OS_LABEL, StatusOS } from "../lib/types";
+
+interface Toast {
+  id: number;
+  message: string;
+  type: "success" | "error" | "info";
+}
+
+interface ToastContextValue {
+  toasts: Toast[];
+  addToast: (message: string, type: "success" | "error" | "info") => void;
+  removeToast: (id: number) => void;
+}
+
+const ToastContext = createContext<ToastContextValue | null>(null);
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const idCounterRef = { current: 0 };
+
+  const addToast = (message: string, type: "success" | "error" | "info") => {
+    const id = ++idCounterRef.current;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+  };
+
+  const removeToast = (id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  return (
+    <ToastContext.Provider value={{ toasts, addToast, removeToast }}>
+      {children}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+        {toasts.map((toast) => (
+          <Toast key={toast.id} toast={toast} onClose={removeToast} />
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+function Toast({ toast, onClose }: { toast: Toast; onClose: (id: number) => void }) {
+  const styles = {
+    success: "bg-emerald-600 text-white",
+    error: "bg-rose-600 text-white",
+    info: "bg-brand-600 text-white",
+  };
+  const icons = {
+    success: CheckCircle2,
+    error: AlertCircle,
+    info: Info,
+  };
+  const Icon = icons[toast.type];
+
+  return (
+    <div
+      className={`pointer-events-auto animate-slide-in flex items-center gap-2 rounded-xl px-4 py-3 shadow-lg min-w-[280px] max-w-md ${styles[toast.type]}`}
+      onClick={() => onClose(toast.id)}
+    >
+      <Icon size={20} className="shrink-0" />
+      <p className="text-sm font-medium">{toast.message}</p>
+    </div>
+  );
+}
+
+export function useToast() {
+  const ctx = useContext(ToastContext);
+  if (!ctx) throw new Error("useToast must be used within ToastProvider");
+  return ctx;
+}
 
 export const STATUS_COLORS: Record<string, string> = {
   criada: "bg-sky-100 text-sky-800 ring-sky-300",

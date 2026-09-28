@@ -11,10 +11,12 @@ from app.database import get_db
 from app.models.models import (
     AcaoFiscal,
     AutoInfracao,
+    CategoriaDocumento,
     ItensApreensao,
     MedidaStatus,
     OrdemServico,
     Reincidencia,
+    Regiao,
     StatusAI,
     StatusDocumento,
     StatusTributario,
@@ -30,6 +32,7 @@ from app.schemas.schemas import (
     AutoInfracaoLista,
     ItensApreensaoIn,
     MinhaAcaoOut,
+    RegiaoOut,
     TermoMoradorSitRuaIn,
     TipoDocumentoOut,
 )
@@ -43,6 +46,7 @@ class AcaoCompleta(BaseModel):
     descricao: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    id_regiao: int | None = None
     auto_infracao: AutoInfracaoCreate | None = None
     itens_apreensao: list[ItensApreensaoIn] | None = None
     termo_morador: TermoMoradorSitRuaIn | None = None
@@ -127,6 +131,13 @@ def _tipo_documento(db: Session, tipo: TipoAcao) -> TipoDocumento:
 
 def _letra_ano(ano: int) -> str:
     return chr(ord("A") + (ano - 2026))
+
+
+def _nome_regiao(db: Session, id_regiao: int | None) -> str | None:
+    if not id_regiao:
+        return None
+    regiao = db.get(Regiao, id_regiao)
+    return regiao.nome if regiao else None
 
 
 def _sigla_especialidade(db: Session, auditor: Usuario) -> str:
@@ -275,6 +286,7 @@ def registrar_acao(
         descricao=body.descricao,
         latitude=body.latitude,
         longitude=body.longitude,
+        id_regiao=body.id_regiao,
         tipo_documento_id=td.id,
         status_documento=StatusDocumento.rascunho,
     )
@@ -302,7 +314,9 @@ def registrar_acao(
     )
     db.commit()
     db.refresh(acao)
-    return AcaoFiscalOut.model_validate(acao)
+    out = AcaoFiscalOut.model_validate(acao)
+    out.regiao_nome = _nome_regiao(db, acao.id_regiao)
+    return out
 
 
 @router.get("/tipos-documento", response_model=list[TipoDocumentoOut])
@@ -317,17 +331,58 @@ def listar_tipos_documento(
     ).all()
 
 
+@router.get("/regioes", response_model=list[RegiaoOut])
+def listar_regioes(
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    return db.scalars(select(Regiao).order_by(Regiao.nome)).all()
+
+
 @router.get("/acoes/minhas", response_model=list[MinhaAcaoOut])
 def minhas_acoes(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
+    tipo_documento_id: int | None = None,
+    id_regiao: int | None = None,
+    status_documento: StatusDocumento | None = None,
+    categoria: CategoriaDocumento | None = None,
+    q: str | None = None,
+    de: date | None = None,
+    ate: date | None = None,
 ):
+    filters = [AcaoFiscal.auditor_id == usuario.id]
+    if tipo_documento_id:
+        filters.append(AcaoFiscal.tipo_documento_id == tipo_documento_id)
+    if id_regiao:
+        filters.append(AcaoFiscal.id_regiao == id_regiao)
+    if status_documento:
+        filters.append(AcaoFiscal.status_documento == status_documento)
+    if categoria:
+        filters.append(
+            AcaoFiscal.tipo_documento_id.in_(
+                select(TipoDocumento.id).where(TipoDocumento.categoria == categoria)
+            )
+        )
+    if q:
+        q_like = f"%{q.lower()}%"
+        filters.append(
+            func.lower(AcaoFiscal.titulo).like(q_like)
+            | func.lower(AcaoFiscal.descricao).like(q_like)
+        )
+    if de:
+        filters.append(AcaoFiscal.criado_em >= datetime.combine(de, datetime.min.time()))
+    if ate:
+        filters.append(AcaoFiscal.criado_em <= datetime.combine(ate, datetime.max.time()))
+
     stmt = (
         select(AcaoFiscal)
-        .where(AcaoFiscal.auditor_id == usuario.id)
+        .where(*filters)
         .options(
             selectinload(AcaoFiscal.auto_infracao),
             selectinload(AcaoFiscal.os),
+            selectinload(AcaoFiscal.regiao),
+            selectinload(AcaoFiscal.tipo_documento),
         )
         .order_by(AcaoFiscal.criado_em.desc())
         .limit(30)
@@ -338,6 +393,7 @@ def minhas_acoes(
         item.os_numero = acao.os.numero
         item.os_tema = acao.os.tema
         item.os_status = acao.os.status
+        item.regiao_nome = acao.regiao.nome if acao.regiao else None
         resultado.append(item)
     return resultado
 
@@ -580,6 +636,7 @@ def juntar_documento(
 
 @router.get("/autos", response_model=list[AutoInfracaoLista])
 def listar_autos(
+    id_regiao: int | None = None,
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ):
@@ -588,6 +645,8 @@ def listar_autos(
         .options(selectinload(AutoInfracao.acao).selectinload(AcaoFiscal.os))
         .order_by(AutoInfracao.id.desc())
     )
+    if id_regiao:
+        stmt = stmt.join(AcaoFiscal).where(AcaoFiscal.id_regiao == id_regiao)
     autos = []
     for ai in db.scalars(stmt):
         autos.append(

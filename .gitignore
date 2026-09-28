@@ -37,3 +37,7 @@ frontend/vite.out.log
 .idea/
 Thumbs.db
 .DS_Store
+
+# Artefatos de build / debug
+*.tsbuildinfo
+_*
